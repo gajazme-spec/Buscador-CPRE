@@ -79,39 +79,39 @@ def leer_pdf(contenido, nombre):
 def leer_word(contenido, nombre):
     texto_total = ""
     doc = docx.Document(io.BytesIO(contenido))
-    # Extraer párrafos
     for p in doc.paragraphs:
         texto_total += p.text + "\n"
-    # Extraer tablas (muy común en censos médicos)
     for table in doc.tables:
         for row in table.rows:
             texto_total += " | ".join([cell.text.strip() for cell in row.cells]) + "\n"
     return procesar_texto(texto_total, nombre)
 
 st.title("Generador de Base de Datos CPRE")
-st.caption("Sube el PDF o Word del censo. Extraerá expedientes de CPRE y sus laboratorios automáticamente.")
+st.caption("Sube uno o varios archivos (PDF o Word). Extraerá los expedientes y laboratorios en un solo Excel.")
 
-archivo = st.file_uploader("Sube tu archivo (PDF o Word)", type=["pdf", "docx"])
+# EL CAMBIO CLAVE: accept_multiple_files=True
+archivos = st.file_uploader("Sube tus archivos (PDF o Word)", type=["pdf", "docx"], accept_multiple_files=True)
 
-if archivo:
-    with st.spinner("Extrayendo datos..."):
-        ext = archivo.name.lower().rsplit(".", 1)[-1]
-        if ext == "pdf":
-            resultados = leer_pdf(archivo.getvalue(), archivo.name)
-        elif ext == "docx":
-            resultados = leer_word(archivo.getvalue(), archivo.name)
-        else:
-            resultados = []
+if archivos:
+    with st.spinner("Extrayendo datos de todos los archivos..."):
+        resultados_totales = []
+        for archivo in archivos:
+            ext = archivo.name.lower().rsplit(".", 1)[-1]
+            if ext == "pdf":
+                resultados_totales += leer_pdf(archivo.getvalue(), archivo.name)
+            elif ext == "docx":
+                resultados_totales += leer_word(archivo.getvalue(), archivo.name)
         
-    if resultados:
-        df = pd.DataFrame(resultados)
+    if resultados_totales:
+        df = pd.DataFrame(resultados_totales)
+        # Eliminar duplicados de TODOS los archivos subidos
         df_uniq = df.drop_duplicates(subset=["Expediente"], keep="first")
         
         columnas_orden = ["Expediente", "Género", "Edad actual", "HB", "PLT", "ALB", "BT", "Cr", "Origen"]
         columnas_existentes = [c for c in columnas_orden if c in df_uniq.columns]
         df_final = df_uniq[columnas_existentes]
 
-        st.success(f"¡Se encontraron {len(df_final)} pacientes con CPRE!")
+        st.success(f"¡Se encontraron {len(df_final)} pacientes con CPRE en {len(archivos)} archivo(s)!")
         st.dataframe(df_final, width='stretch', hide_index=True)
 
         buf = io.BytesIO()
@@ -119,8 +119,8 @@ if archivo:
         st.download_button(
             label="⬇️ Descargar Base de Datos en Excel",
             data=buf.getvalue(),
-            file_name="Base_CPRE_Extraida.xlsx",
+            file_name="Base_CPRE_Consolidada.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.warning("No se encontraron pacientes de CPRE en el archivo. Revisa que el texto sea legible o que contenga las palabras clave.")
+        st.warning("No se encontraron pacientes de CPRE en los archivos subidos.")
