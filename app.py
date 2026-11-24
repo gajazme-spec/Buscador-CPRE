@@ -2,6 +2,7 @@ import io
 import re
 import pandas as pd
 import streamlit as st
+import docx
 
 try:
     import pdfplumber
@@ -31,7 +32,6 @@ def extraer_datos_paciente(linea):
         "Expediente": "", "Género": "", "Edad actual": "",
         "HB": "", "PLT": "", "ALB": "", "BT": "", "Cr": ""
     }
-    
     m_exp = REGEX_EXP.search(linea)
     if m_exp: datos["Expediente"] = m_exp.group(1)
     
@@ -46,30 +46,20 @@ def extraer_datos_paciente(linea):
 
     m_hb = REGEX_HB.search(linea)
     if m_hb: datos["HB"] = m_hb.group(1)
-    
     m_plt = REGEX_PLT.search(linea)
     if m_plt: datos["PLT"] = m_plt.group(1)
-    
     m_alb = REGEX_ALB.search(linea)
     if m_alb: datos["ALB"] = m_alb.group(1)
-    
     m_bt = REGEX_BT.search(linea)
     if m_bt: datos["BT"] = m_bt.group(1)
-    
     m_creat = REGEX_CREAT.search(linea)
     if m_creat: datos["Cr"] = m_creat.group(1)
 
     return datos
 
-def escanear_pdf(contenido, nombre):
-    if not PDF_OK: return []
+def procesar_texto(texto, nombre):
     resultados = []
-    with pdfplumber.open(io.BytesIO(contenido)) as pdf:
-        texto_total = ""
-        for pagina in pdf.pages:
-            texto_total += (pagina.extract_text() or "") + "\n"
-    
-    lineas = texto_total.splitlines()
+    lineas = texto.splitlines()
     for linea in lineas:
         if REGEX_CPRE.search(linea):
             datos = extraer_datos_paciente(linea)
@@ -78,17 +68,40 @@ def escanear_pdf(contenido, nombre):
                 resultados.append(datos)
     return resultados
 
+def leer_pdf(contenido, nombre):
+    if not PDF_OK: return []
+    texto_total = ""
+    with pdfplumber.open(io.BytesIO(contenido)) as pdf:
+        for pagina in pdf.pages:
+            texto_total += (pagina.extract_text() or "") + "\n"
+    return procesar_texto(texto_total, nombre)
+
+def leer_word(contenido, nombre):
+    texto_total = ""
+    doc = docx.Document(io.BytesIO(contenido))
+    # Extraer párrafos
+    for p in doc.paragraphs:
+        texto_total += p.text + "\n"
+    # Extraer tablas (muy común en censos médicos)
+    for table in doc.tables:
+        for row in table.rows:
+            texto_total += " | ".join([cell.text.strip() for cell in row.cells]) + "\n"
+    return procesar_texto(texto_total, nombre)
+
 st.title("Generador de Base de Datos CPRE")
-st.caption("Sube el PDF del censo. Extraerá expedientes de CPRE y sus laboratorios automáticamente.")
+st.caption("Sube el PDF o Word del censo. Extraerá expedientes de CPRE y sus laboratorios automáticamente.")
 
-if not PDF_OK:
-    st.error("Falta pdfplumber. Ejecuta: py -m pip install pdfplumber")
-
-archivo = st.file_uploader("Sube el PDF del censo", type=["pdf"])
+archivo = st.file_uploader("Sube tu archivo (PDF o Word)", type=["pdf", "docx"])
 
 if archivo:
-    with st.spinner("Extrayendo datos del PDF..."):
-        resultados = escanear_pdf(archivo.getvalue(), archivo.name)
+    with st.spinner("Extrayendo datos..."):
+        ext = archivo.name.lower().rsplit(".", 1)[-1]
+        if ext == "pdf":
+            resultados = leer_pdf(archivo.getvalue(), archivo.name)
+        elif ext == "docx":
+            resultados = leer_word(archivo.getvalue(), archivo.name)
+        else:
+            resultados = []
         
     if resultados:
         df = pd.DataFrame(resultados)
@@ -110,4 +123,4 @@ if archivo:
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         )
     else:
-        st.warning("No se encontraron pacientes de CPRE en el PDF.")
+        st.warning("No se encontraron pacientes de CPRE en el archivo. Revisa que el texto sea legible o que contenga las palabras clave.")
